@@ -312,10 +312,11 @@
                 const response = await fetch(scriptUrl);
                 const data = await response.json();
 
-                if (data.status === 'success' && Array.isArray(data.photos) && data.photos.length > 0) {
+                if (data.status === 'success' && Array.isArray(data.photos)) {
                     // Merge local likes state with fetched Drive photos
                     const localLikesMap = new Map(photos.map(p => [p.id, { likes: p.likes, liked: p.liked }]));
 
+                    // Replace local photos with fresh Drive list (purging deleted items)
                     photos = data.photos.map(p => {
                         const localState = localLikesMap.get(p.id) || { likes: 0, liked: false };
                         return {
