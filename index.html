@@ -298,35 +298,47 @@
             localStorage.setItem('user_liked_photo_ids', JSON.stringify(userLikes));
         }
 
-        async function loadDrivePhotos() {
-            const syncIcon = document.getElementById('syncIcon');
-            if (syncIcon) syncIcon.classList.add('fa-spin');
+async function loadDrivePhotos() {
+    const syncIcon = document.getElementById('syncIcon');
+    if (syncIcon) syncIcon.classList.add('fa-spin');
 
-            const scriptUrl = getScriptUrl();
-            if (!scriptUrl) return;
+    const scriptUrl = getScriptUrl();
+    if (!scriptUrl) return;
 
-            try {
-                const response = await fetch(scriptUrl);
-                const data = await response.json();
+    try {
+        const response = await fetch(scriptUrl);
+        const data = await response.json();
 
-                if (data.status === 'success' && Array.isArray(data.photos)) {
-                    // Keep photos that are currently uploading in the background
-                    const uploadingPhotos = photos.filter(p => p.isUploading);
-                    const drivePhotos = data.photos.map(p => ({
-                        ...p,
-                        liked: userLikes.includes(p.id)
-                    }));
+        if (data.status === 'success' && Array.isArray(data.photos)) {
+            const drivePhotos = data.photos.map(p => ({
+                ...p,
+                liked: userLikes.includes(p.id)
+            }));
 
-                    photos = [...uploadingPhotos, ...drivePhotos];
-                    savePhotosToStorage();
-                    renderGallery();
-                }
-            } catch (err) {
-                console.warn('Could not sync live Drive photos:', err);
-            } finally {
-                if (syncIcon) syncIcon.classList.remove('fa-spin');
-            }
+            // Filter out temporary uploading items if they are now present in Drive
+            photos = photos.filter(p => {
+                if (!p.isUploading) return false; // Remove old non-uploading photos, drivePhotos has them
+
+                // If a photo from Drive has the same caption & uploader, the upload finished!
+                const alreadySynced = drivePhotos.some(dp => 
+                    dp.uploader === p.uploader && 
+                    dp.caption === p.caption
+                );
+
+                return !alreadySynced; // Keep temp item ONLY if it's not in Drive yet
+            });
+
+            // Merge remaining active uploads with fresh Drive photos
+            photos = [...photos, ...drivePhotos];
+            savePhotosToStorage();
+            renderGallery();
         }
+    } catch (err) {
+        console.warn('Could not sync live Drive photos:', err);
+    } finally {
+        if (syncIcon) syncIcon.classList.remove('fa-spin');
+    }
+}
 
         function renderGallery() {
             const grid = document.getElementById('galleryGrid');
@@ -572,74 +584,83 @@
             document.getElementById('dropzonePreview').classList.add('hidden');
         }
 
-        async function handleUploadSubmit(e) {
-            e.preventDefault();
-            const uploader = document.getElementById('uploaderNameInput').value.trim();
-            const caption = document.getElementById('captionInput').value.trim();
-            const previewImgSrc = document.getElementById('previewImg').src;
+    async function handleUploadSubmit(e) {
+    e.preventDefault();
+    const uploader = document.getElementById('uploaderNameInput').value.trim();
+    const caption = document.getElementById('captionInput').value.trim();
+    const previewImgSrc = document.getElementById('previewImg').src;
 
-            if (!currentFileBase64 || !previewImgSrc) {
-                showToast('Please select a photo to upload', 'error');
-                return;
-            }
+    if (!currentFileBase64 || !previewImgSrc) {
+        showToast('Please select a photo to upload', 'error');
+        return;
+    }
 
-            const payload = {
-                base64: currentFileBase64,
-                mimeType: currentFileType,
-                fileName: `Guest_${Date.now()}.jpg`,
-                uploader: uploader,
-                caption: caption
-            };
+    const payload = {
+        base64: currentFileBase64,
+        mimeType: currentFileType,
+        fileName: `Guest_${Date.now()}.jpg`,
+        uploader: uploader,
+        caption: caption
+    };
 
-            const tempId = "temp_" + Date.now();
-            const tempPhoto = {
-                id: tempId,
-                url: previewImgSrc,
-                uploader: uploader || "Guest",
-                caption: caption,
-                date: new Date().toISOString(),
-                likes: 0,
-                isUploading: true
-            };
+    const tempId = "temp_" + Date.now();
+    const tempPhoto = {
+        id: tempId,
+        url: previewImgSrc,
+        uploader: uploader || "Guest",
+        caption: caption,
+        date: new Date().toISOString(),
+        likes: 0,
+        isUploading: true
+    };
 
-            // Add item with loader instantly and close modal
-            photos.unshift(tempPhoto);
+    // Add temporary item to local gallery instantly
+    photos.unshift(tempPhoto);
+    renderGallery();
+    closeUploadModal();
+    showToast('Upload started in background...');
+
+    const scriptUrl = getScriptUrl();
+    if (!scriptUrl) return;
+
+    // Safety Timeout: Remove stuck "Uploading..." overlay after 20 seconds regardless
+    const stuckTimeout = setTimeout(() => {
+        const index = photos.findIndex(p => p.id === tempId);
+        if (index !== -1 && photos[index].isUploading) {
+            photos.splice(index, 1);
             renderGallery();
-            closeUploadModal();
-            showToast('Upload started in background...');
-
-            const scriptUrl = getScriptUrl();
-            if (!scriptUrl) return;
-
-            try {
-                const response = await fetch(scriptUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    body: JSON.stringify(payload)
-                });
-
-                const resData = await response.json();
-
-                if (resData.status === 'success' && resData.photo) {
-                    const index = photos.findIndex(p => p.id === tempId);
-                    if (index !== -1) {
-                        photos[index] = resData.photo;
-                        savePhotosToStorage();
-                        renderGallery();
-                    }
-                    showToast('Photo uploaded successfully!');
-                } else {
-                    photos = photos.filter(p => p.id !== tempId);
-                    renderGallery();
-                    showToast(resData.message || 'Upload failed', 'error');
-                }
-            } catch (err) {
-                console.error('Background Upload Error:', err);
-                photos = photos.filter(p => p.id !== tempId);
-                renderGallery();
-                showToast('Background upload failed', 'error');
-            }
+            loadDrivePhotos(); // Force sync to fetch the real image from Drive
         }
+    }, 20000);
+
+    try {
+        const response = await fetch(scriptUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+        });
+
+        const resData = await response.json();
+        clearTimeout(stuckTimeout);
+
+        if (resData.status === 'success' && resData.photo) {
+            const index = photos.findIndex(p => p.id === tempId);
+            if (index !== -1) {
+                photos[index] = resData.photo; // Swap temp card with permanent Drive card
+                savePhotosToStorage();
+                renderGallery();
+            }
+            showToast('Photo uploaded successfully!');
+        } else {
+            photos = photos.filter(p => p.id !== tempId);
+            renderGallery();
+            showToast(resData.message || 'Upload failed', 'error');
+        }
+    } catch (err) {
+        console.warn('Background response error, relying on auto-sync...', err);
+        // Do not delete temp item immediately; let loadDrivePhotos() or stuckTimeout clear it when Drive responds
+    }
+}
 
         function openUploadModal() {
             const modal = document.getElementById('uploadModal');
