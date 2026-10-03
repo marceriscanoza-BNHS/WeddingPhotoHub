@@ -388,39 +388,32 @@
             `).join('');
         }
 
-        async function toggleLike(e, id) {
-            if (e) e.stopPropagation();
-            const photo = photos.find(p => p.id === id);
-            if (!photo) return;
+async function toggleLike(e, id) {
+    if (e) e.stopPropagation();
+    const photo = photos.find(p => p.id === id);
+    if (!photo) return;
 
-            const isLiked = userLikes.includes(id);
-            if (isLiked) {
-                userLikes = userLikes.filter(lId => lId !== id);
-                photo.likes = Math.max(0, (photo.likes || 0) - 1);
-            } else {
-                userLikes.push(id);
-                photo.likes = (photo.likes || 0) + 1;
-            }
+    const isLiked = userLikes.includes(id);
+    if (isLiked) {
+        userLikes = userLikes.filter(lId => lId !== id);
+        photo.likes = Math.max(0, (photo.likes || 0) - 1);
+    } else {
+        userLikes.push(id);
+        photo.likes = (photo.likes || 0) + 1;
+    }
 
-            savePhotosToStorage();
-            renderGallery();
+    savePhotosToStorage();
+    renderGallery();
 
-            // Send live update to Apps Script backend
-            const scriptUrl = getScriptUrl();
-            if (scriptUrl) {
-                try {
-                    await fetch(scriptUrl, {
-                        method: 'POST',
-                        mode: 'cors',
-                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                        body: JSON.stringify({ action: 'like', id: id, increment: !isLiked })
-                    });
-                } catch (err) {
-                    console.error('Error syncing like:', err);
-                }
-            }
+    const scriptUrl = getScriptUrl();
+    if (scriptUrl) {
+        try {
+            await fetch(`${scriptUrl}?action=like&id=${encodeURIComponent(id)}&increment=${!isLiked}`);
+        } catch (err) {
+            console.error('Error syncing like:', err);
         }
-
+    }
+}
         function openLightbox(id) {
             const photo = photos.find(p => p.id === id);
             if (!photo) return;
@@ -548,100 +541,82 @@
             document.getElementById('dropzonePreview').classList.add('hidden');
         }
 
-        async function handleUploadSubmit(e) {
-            e.preventDefault();
-            const uploader = document.getElementById('uploaderNameInput').value.trim();
-            const caption = document.getElementById('captionInput').value.trim();
-            const previewImgSrc = document.getElementById('previewImg').src;
+   async function handleUploadSubmit(e) {
+    e.preventDefault();
+    const uploader = document.getElementById('uploaderNameInput').value.trim();
+    const caption = document.getElementById('captionInput').value.trim();
+    const previewImgSrc = document.getElementById('previewImg').src;
 
-            if (!currentFileBase64 || !previewImgSrc) {
-                showToast('Please select a photo to upload', 'error');
-                return;
+    if (!currentFileBase64 || !previewImgSrc) {
+        showToast('Please select a photo to upload', 'error');
+        return;
+    }
+
+    const submitBtn = document.getElementById('submitBtn');
+    const progressContainer = document.getElementById('uploadProgressContainer');
+    const progressBar = document.getElementById('uploadProgressBar');
+    const statusText = document.getElementById('uploadStatusText');
+    const percentText = document.getElementById('uploadPercentText');
+
+    submitBtn.disabled = true;
+    submitBtn.classList.add('opacity-50');
+    progressContainer.classList.remove('hidden');
+
+    progressBar.style.width = '30%';
+    percentText.textContent = '30%';
+    statusText.textContent = 'Optimizing photo...';
+
+    const scriptUrl = getScriptUrl();
+
+    if (scriptUrl) {
+        statusText.textContent = 'Uploading directly to Google Drive...';
+        progressBar.style.width = '60%';
+        percentText.textContent = '60%';
+
+        try {
+            const payload = {
+                base64: currentFileBase64,
+                mimeType: currentFileType,
+                fileName: `Guest_${Date.now()}.jpg`,
+                uploader: uploader,
+                caption: caption
+            };
+
+            // text/plain avoids CORS preflight error in Apps Script
+            const response = await fetch(scriptUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(payload)
+            });
+
+            const resData = await response.json();
+            
+            if (resData.status === 'success') {
+                showToast('Photo uploaded and synced!');
+            } else {
+                showToast(resData.message || 'Upload failed', 'error');
             }
-
-            const submitBtn = document.getElementById('submitBtn');
-            const progressContainer = document.getElementById('uploadProgressContainer');
-            const progressBar = document.getElementById('uploadProgressBar');
-            const statusText = document.getElementById('uploadStatusText');
-            const percentText = document.getElementById('uploadPercentText');
-
-            submitBtn.disabled = true;
-            submitBtn.classList.add('opacity-50');
-            progressContainer.classList.remove('hidden');
-
-            progressBar.style.width = '30%';
-            percentText.textContent = '30%';
-            statusText.textContent = 'Optimizing photo...';
-
-            const scriptUrl = getScriptUrl();
-            let newPhotoObj = null;
-
-            if (scriptUrl) {
-                statusText.textContent = 'Uploading directly to Google Drive...';
-                progressBar.style.width = '60%';
-                percentText.textContent = '60%';
-
-                try {
-                    const payload = {
-                        base64: currentFileBase64,
-                        mimeType: currentFileType,
-                        fileName: `Guest_${Date.now()}.jpg`,
-                        uploader: uploader,
-                        caption: caption
-                    };
-
-                    const response = await fetch(scriptUrl, {
-                        method: 'POST',
-                        mode: 'cors',
-                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                        body: JSON.stringify(payload)
-                    });
-
-                    const resData = await response.json();
-                    
-                    if (resData.status === 'success' && resData.photo) {
-                        newPhotoObj = resData.photo;
-                        showToast('Photo uploaded and synced!');
-                    } else if (resData.status === 'success') {
-                        showToast('Photo uploaded to Google Drive!');
-                    } else {
-                        showToast('Uploaded to Drive!', 'success');
-                    }
-                } catch (err) {
-                    console.error('Drive Upload Notice:', err);
-                    showToast('Uploaded to Google Drive!', 'success');
-                }
-            }
-
-            progressBar.style.width = '100%';
-            percentText.textContent = '100%';
-            statusText.textContent = 'Complete!';
-
-            setTimeout(() => {
-                if (!newPhotoObj) {
-                    newPhotoObj = {
-                        id: 'photo-' + Date.now(),
-                        url: previewImgSrc,
-                        uploader: uploader,
-                        caption: caption,
-                        date: new Date().toISOString(),
-                        likes: 0
-                    };
-                }
-
-                photos.unshift(newPhotoObj);
-                savePhotosToStorage();
-                renderGallery();
-
-                closeUploadModal();
-                submitBtn.disabled = false;
-                submitBtn.classList.remove('opacity-50');
-                progressContainer.classList.add('hidden');
-                progressBar.style.width = '0%';
-                
-                setTimeout(loadDrivePhotos, 1500);
-            }, 600);
+        } catch (err) {
+            console.error('Drive Upload Error:', err);
+            showToast('Upload failed! Check console.', 'error');
         }
+    }
+
+    progressBar.style.width = '100%';
+    percentText.textContent = '100%';
+    statusText.textContent = 'Complete!';
+
+    setTimeout(() => {
+        closeUploadModal();
+        submitBtn.disabled = false;
+        submitBtn.classList.remove('opacity-50');
+        progressContainer.classList.add('hidden');
+        progressBar.style.width = '0%';
+        
+        // Reload photos from Drive
+        loadDrivePhotos();
+    }, 600);
+}
 
         function openUploadModal() {
             const modal = document.getElementById('uploadModal');
