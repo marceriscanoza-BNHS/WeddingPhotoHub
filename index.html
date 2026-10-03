@@ -272,7 +272,7 @@
         <p>© 2026 Connie&Eris Wedding Photo Hub.</p>
     </footer>
 
-    <script>
+<script>
         let photos = JSON.parse(localStorage.getItem('shared_gallery_photos') || '[]');
         let userLikes = JSON.parse(localStorage.getItem('user_liked_photo_ids') || '[]');
         let currentFileBase64 = null;
@@ -292,7 +292,9 @@
         });
 
         function savePhotosToStorage() {
-            localStorage.setItem('shared_gallery_photos', JSON.stringify(photos));
+            // Save only permanent photos to localStorage, skip temp uploading items
+            const permanentPhotos = photos.filter(p => !p.isUploading);
+            localStorage.setItem('shared_gallery_photos', JSON.stringify(permanentPhotos));
             localStorage.setItem('user_liked_photo_ids', JSON.stringify(userLikes));
         }
 
@@ -308,11 +310,14 @@
                 const data = await response.json();
 
                 if (data.status === 'success' && Array.isArray(data.photos)) {
-                    photos = data.photos.map(p => ({
+                    // Keep photos that are currently uploading in the background
+                    const uploadingPhotos = photos.filter(p => p.isUploading);
+                    const drivePhotos = data.photos.map(p => ({
                         ...p,
                         liked: userLikes.includes(p.id)
                     }));
 
+                    photos = [...uploadingPhotos, ...drivePhotos];
                     savePhotosToStorage();
                     renderGallery();
                 }
@@ -323,149 +328,126 @@
             }
         }
 
-function renderGallery() {
-    
-    const grid = document.getElementById('galleryGrid');
-    const emptyState = document.getElementById('emptyState');
-    const searchVal = document.getElementById('searchInput').value.toLowerCase();
-    const sortVal = document.getElementById('sortSelect').value;
+        function renderGallery() {
+            const grid = document.getElementById('galleryGrid');
+            const emptyState = document.getElementById('emptyState');
+            const searchVal = document.getElementById('searchInput').value.toLowerCase();
+            const sortVal = document.getElementById('sortSelect').value;
 
-    let filtered = photos.filter(p => 
-        (p.uploader || '').toLowerCase().includes(searchVal) || 
-        (p.caption || '').toLowerCase().includes(searchVal)
-    );
+            let filtered = photos.filter(p => 
+                (p.uploader || '').toLowerCase().includes(searchVal) || 
+                (p.caption || '').toLowerCase().includes(searchVal)
+            );
 
-    if (sortVal === 'newest') {
-        filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
-    } else if (sortVal === 'oldest') {
-        filtered.sort((a, b) => new Date(a.date) - new Date(b.date));
-    } else if (sortVal === 'likes') {
-        filtered.sort((a, b) => (b.likes || 0) - (a.likes || 0));
-    }
-
-    document.getElementById('photoCount').textContent = photos.length;
-    const uniqueUploaders = new Set(photos.map(p => (p.uploader || 'Guest').toLowerCase()));
-    document.getElementById('uploaderCount').textContent = uniqueUploaders.size;
-
-    if (filtered.length === 0) {
-        grid.innerHTML = '';
-        emptyState.classList.remove('hidden');
-        emptyState.classList.add('flex');
-        return;
-    }
-
-    emptyState.classList.add('hidden');
-    emptyState.classList.remove('flex');
-
-    grid.innerHTML = filtered.map(item => {
-        const isUploading = item.isUploading;
-
-        return `
-            <div class="glass-card rounded-2xl overflow-hidden group flex flex-col justify-between relative">
-                
-                <!-- Image Container with Lightbox Click & Background Loading Overlay -->
-                <div class="relative cursor-pointer overflow-hidden aspect-square bg-slate-900" onclick="${isUploading ? '' : `openLightbox('${item.id}')`}">
-                    <img src="${item.url}" alt="${escapeHtml(item.caption || '')}" class="w-full h-full object-cover transition-transform duration-500 ${isUploading ? 'opacity-40 blur-[2px]' : 'group-hover:scale-105'}" loading="lazy" onerror="this.onerror=null; this.src='https://placehold.co/600x600/1e293b/818cf8?text=Wedding+Photo';">
-                    
-                    ${isUploading ? `
-                        <!-- Spinner overlay while uploading to Google Drive -->
-                        <div class="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/60 z-10 text-white">
-                            <i class="fa-solid fa-circle-notch animate-spin text-2xl text-indigo-400 mb-2"></i>
-                            <span class="text-xs font-semibold text-slate-200">Uploading...</span>
-                        </div>
-                    ` : `
-                        <div class="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3.5">
-                            <span class="text-xs text-white font-medium line-clamp-1"><i class="fa-solid fa-expand mr-1.5 text-indigo-400"></i> Click to enlarge</span>
-                        </div>
-                    `}
-                </div>
-
-                <!-- Card Details -->
-                <div class="p-4 space-y-2 flex-grow flex flex-col justify-between ${isUploading ? 'opacity-50 pointer-events-none' : ''}">
-                    <div>
-                        <p class="text-xs text-slate-200 line-clamp-2 leading-snug mb-2 font-normal">${escapeHtml(item.caption || 'No caption')}</p>
-                    </div>
-
-                    <div class="flex items-center justify-between pt-2 border-t border-slate-800/80 text-xs">
-                        <div class="flex items-center gap-2 overflow-hidden">
-                            <div class="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-[10px] flex-shrink-0">
-                                ${escapeHtml((item.uploader || 'G').charAt(0).toUpperCase())}
-                            </div>
-                            <span class="text-slate-300 font-medium truncate text-[11px]">${escapeHtml(item.uploader || 'Guest')}</span>
-                        </div>
-
-                        <button onclick="toggleLike(event, '${item.id}')" ${isUploading ? 'disabled' : ''} class="flex items-center gap-1 text-slate-400 hover:text-rose-400 transition-colors ml-2">
-                            <i class="${userLikes.includes(item.id) ? 'fa-solid text-rose-500' : 'fa-regular'} fa-heart text-xs"></i>
-                            <span class="text-[11px]">${item.likes || 0}</span>
-                        </button>
-                    </div>
-                </div>
-
-            </div>
-        `;
-    }).join('');
-}
-
-// Function to handle liking/unliking a photo
-async function toggleLike(e, id) {
-    if (e) e.stopPropagation();
-
-    const photo = photos.find(p => p.id === id);
-    if (!photo) return;
-
-    // Check if current user already liked this photo locally
-    const isLiked = userLikes.includes(id);
-    
-    if (isLiked) {
-        userLikes = userLikes.filter(lId => lId !== id);
-        photo.likes = Math.max(0, (photo.likes || 0) - 1);
-    } else {
-        userLikes.push(id);
-        photo.likes = (photo.likes || 0) + 1;
-    }
-
-    // Save user's local liked state
-    localStorage.setItem('userLikes', JSON.stringify(userLikes));
-    renderGallery();
-
-    // Send updated like to Google Apps Script
-    const scriptUrl = getScriptUrl();
-    if (scriptUrl) {
-        try {
-            const response = await fetch(`${scriptUrl}?action=like&id=${encodeURIComponent(id)}&increment=${!isLiked}`);
-            const data = await response.json();
-            
-            if (data.status === 'success') {
-                photo.likes = data.likes; // Sync exact server count
-                renderGallery();
+            if (sortVal === 'newest') {
+                filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+            } else if (sortVal === 'oldest') {
+                filtered.sort((a, b) => new Date(a.date) - new Date(b.date));
+            } else if (sortVal === 'likes') {
+                filtered.sort((a, b) => (b.likes || 0) - (a.likes || 0));
             }
-        } catch (err) {
-            console.error('Failed to sync like:', err);
+
+            document.getElementById('photoCount').textContent = photos.length;
+            const uniqueUploaders = new Set(photos.map(p => (p.uploader || 'Guest').toLowerCase()));
+            document.getElementById('uploaderCount').textContent = uniqueUploaders.size;
+
+            if (filtered.length === 0) {
+                grid.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                emptyState.classList.add('flex');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+            emptyState.classList.remove('flex');
+
+            grid.innerHTML = filtered.map(item => {
+                const isUploading = item.isUploading;
+
+                return `
+                    <div class="glass-card rounded-2xl overflow-hidden group flex flex-col justify-between relative">
+                        
+                        <!-- Image Container -->
+                        <div class="relative cursor-pointer overflow-hidden aspect-square bg-slate-900" onclick="${isUploading ? '' : `openLightbox('${item.id}')`}">
+                            <img src="${item.url}" alt="${escapeHtml(item.caption || '')}" class="w-full h-full object-cover transition-transform duration-500 ${isUploading ? 'opacity-40 blur-[2px]' : 'group-hover:scale-105'}" loading="lazy" onerror="this.onerror=null; this.src='https://placehold.co/600x600/1e293b/818cf8?text=Wedding+Photo';">
+                            
+                            ${isUploading ? `
+                                <!-- Spinner overlay while uploading -->
+                                <div class="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/60 z-10 text-white">
+                                    <i class="fa-solid fa-circle-notch animate-spin text-2xl text-indigo-400 mb-2"></i>
+                                    <span class="text-xs font-semibold text-slate-200">Uploading...</span>
+                                </div>
+                            ` : `
+                                <div class="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3.5">
+                                    <span class="text-xs text-white font-medium line-clamp-1"><i class="fa-solid fa-expand mr-1.5 text-indigo-400"></i> Click to enlarge</span>
+                                </div>
+                            `}
+                        </div>
+
+                        <!-- Card Details -->
+                        <div class="p-4 space-y-2 flex-grow flex flex-col justify-between ${isUploading ? 'opacity-50 pointer-events-none' : ''}">
+                            <div>
+                                <p class="text-xs text-slate-200 line-clamp-2 leading-snug mb-2 font-normal">${escapeHtml(item.caption || 'No caption')}</p>
+                            </div>
+
+                            <div class="flex items-center justify-between pt-2 border-t border-slate-800/80 text-xs">
+                                <div class="flex items-center gap-2 overflow-hidden">
+                                    <div class="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-[10px] flex-shrink-0">
+                                        ${escapeHtml((item.uploader || 'G').charAt(0).toUpperCase())}
+                                    </div>
+                                    <span class="text-slate-300 font-medium truncate text-[11px]">${escapeHtml(item.uploader || 'Guest')}</span>
+                                </div>
+
+                                <button onclick="toggleLike(event, '${item.id}')" ${isUploading ? 'disabled' : ''} class="flex items-center gap-1 text-slate-400 hover:text-rose-400 transition-colors ml-2">
+                                    <i class="${userLikes.includes(item.id) ? 'fa-solid text-rose-500' : 'fa-regular'} fa-heart text-xs"></i>
+                                    <span class="text-[11px]">${item.likes || 0}</span>
+                                </button>
+                            </div>
+                        </div>
+
+                    </div>
+                `;
+            }).join('');
         }
-    }
-}
 
-// Function to fetch photos and total likes on page load
-async function loadDrivePhotos() {
-    const scriptUrl = getScriptUrl();
-    if (!scriptUrl) return;
+        async function toggleLike(e, id) {
+            if (e) e.stopPropagation();
 
-    try {
-        const response = await fetch(scriptUrl);
-        const data = await response.json();
+            const photo = photos.find(p => p.id === id);
+            if (!photo || photo.isUploading) return;
 
-        if (data.status === 'success' && Array.isArray(data.photos)) {
-            photos = data.photos;
+            const isLiked = userLikes.includes(id);
+            
+            if (isLiked) {
+                userLikes = userLikes.filter(lId => lId !== id);
+                photo.likes = Math.max(0, (photo.likes || 0) - 1);
+            } else {
+                userLikes.push(id);
+                photo.likes = (photo.likes || 0) + 1;
+            }
+
             savePhotosToStorage();
             renderGallery();
+
+            const scriptUrl = getScriptUrl();
+            if (scriptUrl) {
+                try {
+                    const response = await fetch(`${scriptUrl}?action=like&id=${encodeURIComponent(id)}&increment=${!isLiked}`);
+                    const data = await response.json();
+                    
+                    if (data.status === 'success') {
+                        photo.likes = data.likes;
+                        renderGallery();
+                    }
+                } catch (err) {
+                    console.error('Failed to sync like:', err);
+                }
+            }
         }
-    } catch (err) {
-        console.error('Failed to load photos:', err);
-    }
-}
+
         function openLightbox(id) {
             const photo = photos.find(p => p.id === id);
-            if (!photo) return;
+            if (!photo || photo.isUploading) return;
 
             activeLightboxId = id;
             document.getElementById('lightboxImg').src = photo.url;
@@ -590,95 +572,74 @@ async function loadDrivePhotos() {
             document.getElementById('dropzonePreview').classList.add('hidden');
         }
 
-async function handleUploadSubmit(e) {
-    e.preventDefault();
-    const uploader = document.getElementById('uploaderNameInput').value.trim();
-    const caption = document.getElementById('captionInput').value.trim();
-    const previewImgSrc = document.getElementById('previewImg').src;
+        async function handleUploadSubmit(e) {
+            e.preventDefault();
+            const uploader = document.getElementById('uploaderNameInput').value.trim();
+            const caption = document.getElementById('captionInput').value.trim();
+            const previewImgSrc = document.getElementById('previewImg').src;
 
-    if (!currentFileBase64 || !previewImgSrc) {
-        showToast('Please select a photo to upload', 'error');
-        return;
-    }
-
-    // Capture file details before resetting
-    const payload = {
-        base64: currentFileBase64,
-        mimeType: currentFileType,
-        fileName: `Guest_${Date.now()}.jpg`,
-        uploader: uploader,
-        caption: caption
-    };
-
-    // Create an optimistic local preview card immediately
-    const tempId = "temp_" + Date.now();
-    const tempPhoto = {
-        id: tempId,
-        url: previewImgSrc,
-        uploader: uploader || "Guest",
-        caption: caption,
-        date: new Date().toISOString(),
-        likes: 0,
-        isUploading: true
-    };
-
-    // Add to gallery top immediately & close modal right away
-    photos.unshift(tempPhoto);
-    renderGallery();
-    closeUploadModal();
-    showToast('Upload started in background...');
-
-    const scriptUrl = getScriptUrl();
-    if (!scriptUrl) return;
-
-    // Background Fetch (non-blocking)
-    try {
-        const response = await fetch(scriptUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify(payload)
-        });
-
-        const resData = await response.json();
-
-        if (resData.status === 'success' && resData.photo) {
-            // Replace temporary item with real Google Drive data
-            const index = photos.findIndex(p => p.id === tempId);
-            if (index !== -1) {
-                photos[index] = resData.photo;
-                savePhotosToStorage();
-                renderGallery();
+            if (!currentFileBase64 || !previewImgSrc) {
+                showToast('Please select a photo to upload', 'error');
+                return;
             }
-            showToast('Photo uploaded successfully!');
-        } else {
-            // Remove temp item if failed
-            photos = photos.filter(p => p.id !== tempId);
+
+            const payload = {
+                base64: currentFileBase64,
+                mimeType: currentFileType,
+                fileName: `Guest_${Date.now()}.jpg`,
+                uploader: uploader,
+                caption: caption
+            };
+
+            const tempId = "temp_" + Date.now();
+            const tempPhoto = {
+                id: tempId,
+                url: previewImgSrc,
+                uploader: uploader || "Guest",
+                caption: caption,
+                date: new Date().toISOString(),
+                likes: 0,
+                isUploading: true
+            };
+
+            // Add item with loader instantly and close modal
+            photos.unshift(tempPhoto);
             renderGallery();
-            showToast(resData.message || 'Upload failed', 'error');
+            closeUploadModal();
+            showToast('Upload started in background...');
+
+            const scriptUrl = getScriptUrl();
+            if (!scriptUrl) return;
+
+            try {
+                const response = await fetch(scriptUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify(payload)
+                });
+
+                const resData = await response.json();
+
+                if (resData.status === 'success' && resData.photo) {
+                    const index = photos.findIndex(p => p.id === tempId);
+                    if (index !== -1) {
+                        photos[index] = resData.photo;
+                        savePhotosToStorage();
+                        renderGallery();
+                    }
+                    showToast('Photo uploaded successfully!');
+                } else {
+                    photos = photos.filter(p => p.id !== tempId);
+                    renderGallery();
+                    showToast(resData.message || 'Upload failed', 'error');
+                }
+            } catch (err) {
+                console.error('Background Upload Error:', err);
+                photos = photos.filter(p => p.id !== tempId);
+                renderGallery();
+                showToast('Background upload failed', 'error');
+            }
         }
-    } catch (err) {
-        console.error('Background Upload Error:', err);
-        photos = photos.filter(p => p.id !== tempId);
-        renderGallery();
-        showToast('Background upload failed', 'error');
-    }
-}
-
-    progressBar.style.width = '100%';
-    percentText.textContent = '100%';
-    statusText.textContent = 'Complete!';
-
-    setTimeout(() => {
-        closeUploadModal();
-        submitBtn.disabled = false;
-        submitBtn.classList.remove('opacity-50');
-        progressContainer.classList.add('hidden');
-        progressBar.style.width = '0%';
-        
-        // Reload photos from Drive
-        loadDrivePhotos();
-    }, 600);
-}
 
         function openUploadModal() {
             const modal = document.getElementById('uploadModal');
